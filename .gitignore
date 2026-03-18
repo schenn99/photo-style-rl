@@ -1,0 +1,33 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment and secrets
+.env
+*.key
+
+# Large files (models, datasets)
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+
+# Image data (keep structure, not files)
+data/sample_images/*.jpg
+data/sample_images/*.png
+data/sample_images/*.heic
+data/ratings/*.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.cursor/
