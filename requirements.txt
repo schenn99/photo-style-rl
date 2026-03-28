@@ -1,0 +1,11 @@
+torch
+torchvision
+transformers
+diffusers
+peft
+accelerate
+open_clip_torch
+Pillow
+opencv-python
+numpy
+matplotlib
