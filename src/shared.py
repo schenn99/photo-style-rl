@@ -75,6 +75,18 @@ AVAILABLE_REGIONS = [
     "foliage", "water", "building", "clothing", "face"
 ]
 
+# Schema validation constants for training data gating (NB06 generation + NB07 training).
+# These must stay in sync with DeterministicRenderer.apply_basic_params() — if you add
+# a new renderer parameter, add it here too or validate_payload() will reject it.
+VALID_TONE_CURVE_KEYS = frozenset({"blacks", "shadows", "midtones", "highlights", "whites"})
+VALID_COLOR_NAMES = frozenset({"reds", "oranges", "yellows", "greens", "aquas", "blues", "purples", "magentas"})
+VALID_HSL_KEYS = frozenset({"h", "s", "l"})
+VALID_BASIC_KEYS = frozenset({
+    "exposure", "contrast", "temperature", "tint",
+    "shadows", "highlights", "whites", "blacks",
+    "clarity", "vibrance", "saturation", "texture", "dehaze",
+})
+
 # Skin-tone hue range in HSV degrees — covers light to dark skin
 SKIN_HUE_RANGE = (8, 45)
 SKIN_SAT_MIN = 0.10
@@ -695,8 +707,13 @@ def validate_region_edit(region_label, segments, img_rgb_float=None):
     return region_label in labels_present
 
 
-def apply_regional_edits(pil_img, segments, regional_edits, renderer, feather_radius=15):
-    """Apply different params to different masked regions with feathered blending."""
+def apply_regional_edits(pil_img, segments, regional_edits, renderer, feather_radius=15, strength=1.0):
+    """Apply different params to different masked regions with feathered blending.
+
+    strength: passed through to renderer.render(). Use 0.6 for extracted style profiles
+              (compensates for renderer math overshooting Lightroom values), 1.0 for
+              explicit text overrides where Claude chose the values intentionally.
+    """
     img_np = np.array(pil_img).astype(np.float32) / 255.0
     h, w = img_np.shape[:2]
     result = img_np.copy()
@@ -727,14 +744,14 @@ def apply_regional_edits(pil_img, segments, regional_edits, renderer, feather_ra
             continue
 
         if region == 'global':
-            result = renderer.render(result, params, protect_skin=True, strength=1.0)
+            result = renderer.render(result, params, protect_skin=True, strength=strength)
             continue
 
         if region not in label_to_mask:
             continue
 
         protect = region in skin_regions
-        edited = renderer.render(result.copy(), params, protect_skin=protect, strength=1.0)
+        edited = renderer.render(result.copy(), params, protect_skin=protect, strength=strength)
         mask_f = feather_mask(label_to_mask[region], feather_radius)[:, :, None]
         result = edited * mask_f + result * (1.0 - mask_f)
 
@@ -768,6 +785,68 @@ def merge_params(base, override):
         if key in override:
             merged[key] = override[key]
     return merged
+
+
+# =============================================================================
+# Training Data Validation
+# =============================================================================
+
+def validate_payload(payload):
+    """Strict schema validation for synthetic training records.
+    Rejects any payload that contains hallucinated keys or out-of-range values
+    so bad data never reaches the Qwen fine-tuning run.
+
+    Expected format (flat, region-keyed):
+        {"global": {"exposure": 1.5, "tone_curve": {"shadows": 20}},
+         "sky":    {"highlights": -30, "color_mixer": {"blues": {"h": -10}}}}
+
+    Returns True if the payload is clean, False otherwise.
+    """
+    if not isinstance(payload, dict):
+        return False
+
+    for region, edits in payload.items():
+        if not isinstance(edits, dict):
+            return False
+
+        for key, value in edits.items():
+            if key == 'tone_curve':
+                if not isinstance(value, dict):
+                    return False
+                for k, v in value.items():
+                    if k not in VALID_TONE_CURVE_KEYS:
+                        return False
+                    if not isinstance(v, (int, float)) or not (-100 <= v <= 100):
+                        return False
+
+            elif key == 'color_mixer':
+                if not isinstance(value, dict):
+                    return False
+                for color, shifts in value.items():
+                    if color not in VALID_COLOR_NAMES:
+                        return False
+                    if not isinstance(shifts, dict):
+                        return False
+                    for axis, val in shifts.items():
+                        if axis not in VALID_HSL_KEYS:
+                            return False
+                        if not isinstance(val, (int, float)):
+                            return False
+                        limit = 180 if axis == 'h' else 100
+                        if not (-limit <= val <= limit):
+                            return False
+
+            elif key in VALID_BASIC_KEYS:
+                if not isinstance(value, (int, float)):
+                    return False
+                limit = 5 if key == 'exposure' else 100
+                if not (-limit <= value <= limit):
+                    return False
+
+            else:
+                return False  # Unknown key — reject to prevent schema drift
+
+    return True
 
 
 # =============================================================================
