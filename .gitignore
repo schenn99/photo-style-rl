@@ -31,3 +31,6 @@ Thumbs.db
 # IDE
 .vscode/
 .cursor/
+# Pipeline data on Google Drive
+data/slm_training_dataset.jsonl
+*.gguf
