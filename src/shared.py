@@ -507,8 +507,11 @@ class DeterministicRenderer:
 
         result = img_rgb_float.copy()
 
-        skin_mask = detect_skin_mask(result) if protect_skin else None
-        self._current_skin_mask = skin_mask
+        # Always detect skin for basic param protection (temperature, saturation, vibrance).
+        # The protect_skin flag only controls whether the HSL mixer also attenuates
+        # orange/red shifts - that's the more aggressive protection layer.
+        skin_mask = detect_skin_mask(result)
+        self._current_skin_mask = skin_mask if protect_skin else None
 
         basic_keys = {
             'exposure', 'contrast', 'temperature', 'tint', 'shadows', 'highlights',
